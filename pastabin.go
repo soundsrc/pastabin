@@ -5,19 +5,29 @@ import (
 	"net"
 	"net/http"
 	"net/http/fcgi"
-	"io/ioutil"
 	"math/rand"
 	"time"
 	"strings"
 	"html/template"
 	"context"
 	"strconv"
+	"mime/multipart"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
     "go.mongodb.org/mongo-driver/mongo/options"
 )
 
 var basePath string = "/pastabin"
+
+type PostRecord struct {
+	ID               primitive.ObjectID     `json:"ID" bson:"_id,omitempty"`
+	Code             string                 `json:"code" bson:"code,omitempty"`
+	Text             string                 `json:"text" bson:"text,omitempty"`
+	Attachment       []byte                 `json:"attachment" bson:"attachment,omitempty"`
+	AttachmentHeader *multipart.FileHeader  `json:"attachmentHeader" bson:"attachmentHeader,omitempty"`
+	ExpireDate       time.Time              `json:"expireDate" bson:"expireDate,omitempty"`
+}
 
 func main() {
 
@@ -63,6 +73,8 @@ func router(w http.ResponseWriter, r *http.Request) {
 
 	if subPath == "/post" {
 		postHandler(w, r, ctx, database)
+	} else if subPath[0] == '/' && len(subPath) == 7 {
+		readPageHandler(w, r, ctx, database, subPath[1:7])
 	} else {
 		defaultPageHandler(w, r, ctx, database)
 	}
@@ -84,7 +96,7 @@ func sendInternalServerError(w http.ResponseWriter) {
 	fmt.Fprintf(w, "internal server error")
 }
 
-func readPageHandler(w http.ResponseWriter, r *http.Request, ctx context.Context, db *mongo.Database) {
+func readPageHandler(w http.ResponseWriter, r *http.Request, ctx context.Context, db *mongo.Database, code string) {
 
 	var err error = nil
 
@@ -93,6 +105,34 @@ func readPageHandler(w http.ResponseWriter, r *http.Request, ctx context.Context
 			sendInternalServerError(w)
 		}
 	}()
+
+	postsCollection := db.Collection("posts")
+	var result PostRecord
+	err = postsCollection.FindOne(ctx, bson.M{ "code": code }).Decode(&result)
+	if err != nil {
+		http.Redirect(w, r, basePath + "/", 302)
+		return
+	}
+
+	t, err := template.New("display.gohtml").ParseFiles(
+		"display.gohtml",
+		"header.gohtml",
+		"footer.gohtml")
+	if err != nil {
+		return
+	}
+
+	data := struct {
+		BasePath string
+		Text string
+	}{
+		BasePath: basePath,
+		Text: result.Text,
+	}
+	err = t.Execute(w, data)
+	if err != nil {
+		return
+	}
 
 }
 
@@ -106,13 +146,11 @@ func defaultPageHandler(w http.ResponseWriter, r *http.Request, ctx context.Cont
 			sendInternalServerError(w)
 		}
 	}()
-	
-	tpl, err := ioutil.ReadFile("main.gohtml");
-	if err != nil {
-		return
-	}
 
-	t, err := template.New("main").Parse(string(tpl))
+	t, err := template.New("main.gohtml").ParseFiles(
+		"main.gohtml",
+		"header.gohtml",
+		"footer.gohtml")
 	if err != nil {
 		return
 	}
@@ -135,8 +173,7 @@ func postHandler(w http.ResponseWriter, r *http.Request, ctx context.Context, db
 
 	defer func() {
 		if err != nil {
-			w.WriteHeader(500)
-			fmt.Fprintf(w, "internal server error")
+			sendInternalServerError(w)
 		}
 	}()
 
@@ -146,8 +183,7 @@ func postHandler(w http.ResponseWriter, r *http.Request, ctx context.Context, db
 	}
 
 	attachment := []byte{}
-	
-	filename := ""
+
 	file, header, err := r.FormFile("file")
 	if err == nil {
 		defer file.Close()
@@ -167,14 +203,17 @@ func postHandler(w http.ResponseWriter, r *http.Request, ctx context.Context, db
 
 	code := randSeq(6)
 	postsCollection := db.Collection("posts")
-	_, err = postsCollection.InsertOne(ctx, bson.M{
-		"_id": code,
-		"text": textInput,
-		"filename": filename,
-		"attachment": attachment,
-		"attachmentInfo": header,
-		"expireDate": time.Now().Add(time.Second * time.Duration(expire)),
-	})
+
+	data := PostRecord {
+		ID: primitive.NewObjectID(),
+		Code: code,
+		Text: textInput,
+		Attachment: attachment,
+		AttachmentHeader: header,
+		ExpireDate: time.Now().Add(time.Second * time.Duration(expire)),
+	}
+
+	_, err = postsCollection.InsertOne(ctx, data)
 	if err != nil {
 		return
 	}
