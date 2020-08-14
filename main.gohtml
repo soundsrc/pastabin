@@ -1,6 +1,6 @@
 {{template "header"}}
 
-<form method="POST" enctype="multipart/form-data" action="/pastabin/post">
+<form method="POST" enctype="multipart/form-data" action="{{.BasePath}}/post">
     <div><textarea id="textinput" name="text"></textarea></div>
     <div id="filechooser"><input type="file" name="file" /></div>
     <div class="inputdiv">
