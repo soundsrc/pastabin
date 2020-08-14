@@ -1,39 +1,39 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	"html/template"
+	"math/rand"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"net/http/fcgi"
-	"math/rand"
-	"time"
-	"strings"
-	"html/template"
-	"context"
 	"strconv"
-	"mime/multipart"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-    "go.mongodb.org/mongo-driver/mongo/options"
+	"strings"
+	"time"
 )
 
 var basePath string = "/pastabin"
 
 type PostRecord struct {
-	ID               primitive.ObjectID     `json:"ID" bson:"_id,omitempty"`
-	Code             string                 `json:"code" bson:"code,omitempty"`
-	Text             string                 `json:"text" bson:"text,omitempty"`
-	Attachment       []byte                 `json:"attachment" bson:"attachment,omitempty"`
-	AttachmentHeader *multipart.FileHeader  `json:"attachmentHeader" bson:"attachmentHeader,omitempty"`
-	ExpireDate       time.Time              `json:"expireDate" bson:"expireDate,omitempty"`
+	ID               primitive.ObjectID    `json:"ID" bson:"_id,omitempty"`
+	Code             string                `json:"code" bson:"code,omitempty"`
+	Text             string                `json:"text" bson:"text,omitempty"`
+	Attachment       []byte                `json:"attachment" bson:"attachment,omitempty"`
+	AttachmentHeader *multipart.FileHeader `json:"attachmentHeader" bson:"attachmentHeader,omitempty"`
+	ExpireDate       time.Time             `json:"expireDate" bson:"expireDate,omitempty"`
 }
 
 func main() {
 
 	rand.Seed(time.Now().UnixNano())
 
-	http.HandleFunc(basePath + "/", router)
+	http.HandleFunc(basePath+"/", router)
 
 	l, err := net.Listen("tcp", "127.0.0.1:9000")
 	if err != nil {
@@ -80,9 +80,9 @@ func router(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-
 // https://stackoverflow.com/questions/22892120/how-to-generate-a-random-string-of-a-fixed-length-in-go/22892986#22892986
 var letters = []rune("abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789")
+
 func randSeq(n int) string {
 	b := make([]rune, n)
 	for i := range b {
@@ -108,9 +108,9 @@ func readPageHandler(w http.ResponseWriter, r *http.Request, ctx context.Context
 
 	postsCollection := db.Collection("posts")
 	var result PostRecord
-	err = postsCollection.FindOne(ctx, bson.M{ "code": code }).Decode(&result)
+	err = postsCollection.FindOne(ctx, bson.M{"code": code}).Decode(&result)
 	if err != nil {
-		http.Redirect(w, r, basePath + "/", 302)
+		http.Redirect(w, r, basePath+"/", 302)
 		return
 	}
 
@@ -124,10 +124,10 @@ func readPageHandler(w http.ResponseWriter, r *http.Request, ctx context.Context
 
 	data := struct {
 		BasePath string
-		Text string
+		Text     string
 	}{
 		BasePath: basePath,
-		Text: result.Text,
+		Text:     result.Text,
 	}
 	err = t.Execute(w, data)
 	if err != nil {
@@ -135,7 +135,6 @@ func readPageHandler(w http.ResponseWriter, r *http.Request, ctx context.Context
 	}
 
 }
-
 
 func defaultPageHandler(w http.ResponseWriter, r *http.Request, ctx context.Context, db *mongo.Database) {
 
@@ -179,7 +178,7 @@ func postHandler(w http.ResponseWriter, r *http.Request, ctx context.Context, db
 
 	err = r.ParseMultipartForm(4 * 1024 * 1024)
 	if err != nil {
-		return	
+		return
 	}
 
 	attachment := []byte{}
@@ -204,13 +203,13 @@ func postHandler(w http.ResponseWriter, r *http.Request, ctx context.Context, db
 	code := randSeq(6)
 	postsCollection := db.Collection("posts")
 
-	data := PostRecord {
-		ID: primitive.NewObjectID(),
-		Code: code,
-		Text: textInput,
-		Attachment: attachment,
+	data := PostRecord{
+		ID:               primitive.NewObjectID(),
+		Code:             code,
+		Text:             textInput,
+		Attachment:       attachment,
 		AttachmentHeader: header,
-		ExpireDate: time.Now().Add(time.Second * time.Duration(expire)),
+		ExpireDate:       time.Now().Add(time.Second * time.Duration(expire)),
 	}
 
 	_, err = postsCollection.InsertOne(ctx, data)
@@ -218,6 +217,5 @@ func postHandler(w http.ResponseWriter, r *http.Request, ctx context.Context, db
 		return
 	}
 
-	http.Redirect(w, r, basePath + "/" + code, 302)
+	http.Redirect(w, r, basePath+"/"+code, 302)
 }
-
