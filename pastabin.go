@@ -115,6 +115,16 @@ func router(w http.ResponseWriter, r *http.Request) {
 
 	subPath := path[len(basePath):len(path)]
 
+	if subPath == "/robots.txt" {
+		robotsTxt := `
+User-agent: *
+Disallow: /
+Disallow: /form/posts.php`
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte(robotsTxt))
+		return
+	}
+
 	if subPath == "/" {
 
 		defaultPageHandler(w, r, ctx, database)
