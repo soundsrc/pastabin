@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"go.mongodb.org/mongo-driver/bson"
@@ -8,6 +9,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"html/template"
+	"io"
 	"math/rand"
 	"mime/multipart"
 	"net"
@@ -268,11 +270,12 @@ func postHandler(w http.ResponseWriter, r *http.Request, ctx context.Context, db
 	if err == nil {
 		defer file.Close()
 
-		attachment = make([]byte, header.Size)
-		bytesread, err := file.Read(attachment)
-		if int64(bytesread) != header.Size || err != nil {
+		buffer := &bytes.Buffer{}
+		if _, err := io.Copy(buffer, file); err != nil {
 			return
 		}
+
+		attachment = buffer.Bytes()
 	}
 
 	textInput := r.FormValue("text")
