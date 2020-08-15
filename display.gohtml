@@ -13,8 +13,7 @@
 {{end}}
 {{if .InlineAudio}} 
   <div id="content">
-    <audio controls>
-      <source src="{{.AttachmentPath}}" />
+    <audio controls="controls" src="{{.AttachmentPath}}">
     </audio>
   </div>
 {{end}}

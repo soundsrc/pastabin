@@ -192,6 +192,7 @@ func readPageHandler(w http.ResponseWriter, r *http.Request, ctx context.Context
 					"audio/aac",
 					"audio/midi",
 					"audio/x-midi",
+					"audio/mpeg",
 					"audio/mp3",
 					"audio/ogg",
 					"audio/opus",
