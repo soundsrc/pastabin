@@ -37,7 +37,8 @@ type VisitorRecord struct {
 	ID               primitive.ObjectID    `json:"ID" bson:"_id,omitempty"`
 	RemoteAddr       string                `json:"remoteAddr" bson:"remoteAddr"`
 	Banned           bool                  `json:"banned" bson:"banned"`
-	Date             time.Time             `json:"date" bson:"date"`
+	LastAccessDate   time.Time             `json:"lastAccessDate" bson:"lastAccessDate"`
+	ExpireDate       time.Time             `json:"expireDate" bson:"expireDate"`
 }
 
 func main() {
@@ -88,10 +89,16 @@ func router(w http.ResponseWriter, r *http.Request) {
 	ipAddr := strings.Join(remoteAddrPort[0:len(remoteAddrPort)-1], ":")
 
 	visitorsCollection := database.Collection("visitors")
-	var result VisitorRecord
-	err = visitorsCollection.FindOne(ctx, bson.M{"remoteAddr": ipAddr}).Decode(&result)
+	visitorRecord := VisitorRecord{
+		ID: primitive.NewObjectID(),
+		Banned: false,
+		RemoteAddr: ipAddr,
+		LastAccessDate: time.Time{},
+	}
+
+	err = visitorsCollection.FindOne(ctx, bson.M{"remoteAddr": ipAddr}).Decode(&visitorRecord)
 	if err == nil {
-		if result.Banned {
+		if visitorRecord.Banned {
 			w.WriteHeader(403)
 			return
 		}
@@ -101,16 +108,18 @@ func router(w http.ResponseWriter, r *http.Request) {
 
 	// if path contains stuff like .php or whatever, instaban
 	if strings.Contains(path, ".php") {
-		visitorRecord := VisitorRecord{
-			ID: primitive.NewObjectID(),
-			RemoteAddr: ipAddr,
-			Banned: true,
-			Date: time.Now(),
-		};
-		_, err = visitorsCollection.InsertOne(ctx, visitorRecord)
+		visitorRecord.Banned = true
+		visitorRecord.LastAccessDate = time.Now()
+		visitorRecord.ExpireDate = time.Now().AddDate(0, 3, 0) // 3-month ban
+
+		var upsert bool = true
+		_, err = visitorsCollection.ReplaceOne(ctx, bson.M{"_id": visitorRecord.ID}, visitorRecord, &options.ReplaceOptions{ Upsert: &upsert })
 		if err != nil {
 			return
 		}
+
+		send403ServerError(w)
+		return
 	}
 
 	subPath := path[len(basePath):len(path)]
@@ -134,19 +143,37 @@ Disallow: /form/posts.php`
 	
 	if subPath == "/post" {
 
+		// enforce rate limit
+		elapsedSeconds := time.Now().Sub(visitorRecord.LastAccessDate).Seconds()
+		if elapsedSeconds < 10.0 {
+			_ = r.ParseMultipartForm(4 * 1024 * 1024) // can we skip this bit?
+			w.WriteHeader(403)
+			fmt.Fprintf(w, "Rate limit exceeded. Please wait %d seconds.", int(10.0 - elapsedSeconds))
+			return
+		}
+
+		visitorRecord.LastAccessDate = time.Now()
+		visitorRecord.ExpireDate = time.Now().Add(time.Hour * time.Duration(2)) // don't need to keep record around
+
+		var upsert bool = true
+		_, err = visitorsCollection.ReplaceOne(ctx, bson.M{"_id": visitorRecord.ID}, visitorRecord, &options.ReplaceOptions{ Upsert: &upsert })
+		if err != nil {
+			return
+		}
+
 		postHandler(w, r, ctx, database)
 		return
 
 	} 
 	
-	expr := regexp.MustCompile("/attachment/([A-Za-z0-9]{6})")
+	expr := regexp.MustCompile("/attachment/([A-Za-z0-9]{6})$")
 	matches := expr.FindAllStringSubmatch(subPath, -1)
 	if (len(matches) > 0) {
 		getAttachmentHandler(w, r, ctx, database, matches[0][1])
 		return
 	}
 
-	expr = regexp.MustCompile("/([A-Za-z0-9]{6})")
+	expr = regexp.MustCompile("/([A-Za-z0-9]{6})$")
 	matches = expr.FindAllStringSubmatch(subPath, -1)
 	if (len(matches) > 0) {
 		readPageHandler(w, r, ctx, database, subPath[1:7])
