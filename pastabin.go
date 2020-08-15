@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -25,11 +26,18 @@ var basePath string = "/pastabin"
 
 type PostRecord struct {
 	ID               primitive.ObjectID    `json:"ID" bson:"_id,omitempty"`
-	Code             string                `json:"code" bson:"code,omitempty"`
+	Code             string                `json:"code" bson:"code"`
 	Text             string                `json:"text" bson:"text,omitempty"`
 	Attachment       []byte                `json:"attachment" bson:"attachment,omitempty"`
 	AttachmentHeader *multipart.FileHeader `json:"attachmentHeader" bson:"attachmentHeader,omitempty"`
-	ExpireDate       time.Time             `json:"expireDate" bson:"expireDate,omitempty"`
+	ExpireDate       time.Time             `json:"expireDate" bson:"expireDate"`
+}
+
+type VisitorRecord struct {
+	ID               primitive.ObjectID    `json:"ID" bson:"_id,omitempty"`
+	RemoteAddr       string                `json:"remoteAddr" bson:"remoteAddr"`
+	Banned           bool                  `json:"banned" bson:"banned"`
+	Date             time.Time             `json:"date" bson:"date"`
 }
 
 func main() {
@@ -53,11 +61,17 @@ func router(w http.ResponseWriter, r *http.Request) {
 
 	defer func() {
 		if err != nil {
-			sendInternalServerError(w)
+			sendInternalServerError(w, err)
 		}
 	}()
 
 	path := r.URL.Path
+
+	if !strings.HasPrefix(path, basePath) {
+		w.WriteHeader(404)
+		fmt.Fprintf(w, "Not found.")
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -66,10 +80,37 @@ func router(w http.ResponseWriter, r *http.Request) {
 
 	database := client.Database("pastabin")
 
-	if !strings.HasPrefix(path, basePath) {
-		w.WriteHeader(404)
-		fmt.Fprintf(w, "Not found.")
+	remoteAddrPort := strings.Split(r.RemoteAddr, ":")
+	if (len(remoteAddrPort) == 0) {
+		err = errors.New("Unable to determine remote addr")
 		return
+	}
+	ipAddr := remoteAddrPort[0]
+
+	visitorsCollection := database.Collection("visitors")
+	var result VisitorRecord
+	err = visitorsCollection.FindOne(ctx, bson.M{"remoteAddr": ipAddr}).Decode(&result)
+	if err == nil {
+		if result.Banned {
+			w.WriteHeader(403)
+			return
+		}
+	} else {
+		err = nil
+	}
+
+	// if path contains stuff like .php or whatever, instaban
+	if strings.Contains(path, ".php") {
+		visitorRecord := VisitorRecord{
+			ID: primitive.NewObjectID(),
+			RemoteAddr: ipAddr,
+			Banned: true,
+			Date: time.Now(),
+		};
+		_, err = visitorsCollection.InsertOne(ctx, visitorRecord)
+		if err != nil {
+			return
+		}
 	}
 
 	subPath := path[len(basePath):len(path)]
@@ -77,29 +118,32 @@ func router(w http.ResponseWriter, r *http.Request) {
 	if subPath == "/" {
 
 		defaultPageHandler(w, r, ctx, database)
+		return
 
-	} else if subPath == "/post" {
+	} 
+	
+	if subPath == "/post" {
 
 		postHandler(w, r, ctx, database)
+		return
 
-	} else {
-
-		expr := regexp.MustCompile("/attachment/([A-Za-z0-9]{6})")
-		matches := expr.FindAllStringSubmatch(subPath, -1)
-		if (len(matches) > 0) {
-			getAttachmentHandler(w, r, ctx, database, matches[0][1])
-			return
-		}
-
-		expr = regexp.MustCompile("/([A-Za-z0-9]{6})")
-		matches = expr.FindAllStringSubmatch(subPath, -1)
-		if (len(matches) > 0) {
-			readPageHandler(w, r, ctx, database, subPath[1:7])
-			return
-		}
-		
-		send404ServerError(w)
+	} 
+	
+	expr := regexp.MustCompile("/attachment/([A-Za-z0-9]{6})")
+	matches := expr.FindAllStringSubmatch(subPath, -1)
+	if (len(matches) > 0) {
+		getAttachmentHandler(w, r, ctx, database, matches[0][1])
+		return
 	}
+
+	expr = regexp.MustCompile("/([A-Za-z0-9]{6})")
+	matches = expr.FindAllStringSubmatch(subPath, -1)
+	if (len(matches) > 0) {
+		readPageHandler(w, r, ctx, database, subPath[1:7])
+		return
+	}
+	
+	send404ServerError(w)
 }
 
 // https://stackoverflow.com/questions/22892120/how-to-generate-a-random-string-of-a-fixed-length-in-go/22892986#22892986
@@ -113,9 +157,9 @@ func randSeq(n int) string {
 	return string(b)
 }
 
-func sendInternalServerError(w http.ResponseWriter) {
+func sendInternalServerError(w http.ResponseWriter, err error) {
 	w.WriteHeader(500)
-	fmt.Fprintf(w, "Internal server error")
+	fmt.Fprintf(w, "Internal server error: %s", err)
 }
 
 func send404ServerError(w http.ResponseWriter) {
@@ -133,7 +177,7 @@ func getAttachmentHandler(w http.ResponseWriter, r *http.Request, ctx context.Co
 
 	defer func() {
 		if err != nil {
-			sendInternalServerError(w)
+			sendInternalServerError(w, err)
 		}
 	}()
 
@@ -166,7 +210,7 @@ func readPageHandler(w http.ResponseWriter, r *http.Request, ctx context.Context
 
 	defer func() {
 		if err != nil {
-			sendInternalServerError(w)
+			sendInternalServerError(w, err)
 		}
 	}()
 
@@ -254,7 +298,7 @@ func defaultPageHandler(w http.ResponseWriter, r *http.Request, ctx context.Cont
 
 	defer func() {
 		if err != nil {
-			sendInternalServerError(w)
+			sendInternalServerError(w, err)
 		}
 	}()
 
@@ -284,7 +328,7 @@ func postHandler(w http.ResponseWriter, r *http.Request, ctx context.Context, db
 
 	defer func() {
 		if err != nil {
-			sendInternalServerError(w)
+			sendInternalServerError(w, err)
 		}
 	}()
 
