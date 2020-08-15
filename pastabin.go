@@ -85,7 +85,7 @@ func router(w http.ResponseWriter, r *http.Request) {
 		err = errors.New("Unable to determine remote addr")
 		return
 	}
-	ipAddr := remoteAddrPort[0]
+	ipAddr := strings.Join(remoteAddrPort[0:len(remoteAddrPort)-1], ":")
 
 	visitorsCollection := database.Collection("visitors")
 	var result VisitorRecord
