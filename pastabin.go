@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/fcgi"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -58,7 +59,7 @@ func router(w http.ResponseWriter, r *http.Request) {
 
 	path := r.URL.Path
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	client, err := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://localhost:27017"))
 	defer client.Disconnect(ctx)
@@ -73,14 +74,31 @@ func router(w http.ResponseWriter, r *http.Request) {
 
 	subPath := path[len(basePath):len(path)]
 
-	if subPath == "/post" {
-		postHandler(w, r, ctx, database)
-	} else if strings.HasPrefix(subPath, "/attachment/") {
-		getAttachmentHandler(w, r, ctx, database, subPath[12:len(subPath)])
-	} else if subPath[0] == '/' && len(subPath) == 7 {
-		readPageHandler(w, r, ctx, database, subPath[1:7])
-	} else {
+	if subPath == "/" {
+
 		defaultPageHandler(w, r, ctx, database)
+
+	} else if subPath == "/post" {
+
+		postHandler(w, r, ctx, database)
+
+	} else {
+
+		expr := regexp.MustCompile("/attachment/([A-Za-z0-9]{6})")
+		matches := expr.FindAllStringSubmatch(subPath, -1)
+		if (len(matches) > 0) {
+			getAttachmentHandler(w, r, ctx, database, matches[0][1])
+			return
+		}
+
+		expr = regexp.MustCompile("/([A-Za-z0-9]{6})")
+		matches = expr.FindAllStringSubmatch(subPath, -1)
+		if (len(matches) > 0) {
+			readPageHandler(w, r, ctx, database, subPath[1:7])
+			return
+		}
+		
+		send404ServerError(w)
 	}
 }
 
@@ -97,7 +115,17 @@ func randSeq(n int) string {
 
 func sendInternalServerError(w http.ResponseWriter) {
 	w.WriteHeader(500)
-	fmt.Fprintf(w, "internal server error")
+	fmt.Fprintf(w, "Internal server error")
+}
+
+func send404ServerError(w http.ResponseWriter) {
+	w.WriteHeader(404)
+	fmt.Fprintf(w, "Page not found")
+}
+
+func send403ServerError(w http.ResponseWriter) {
+	w.WriteHeader(404)
+	fmt.Fprintf(w, "Access denied")
 }
 
 func getAttachmentHandler(w http.ResponseWriter, r *http.Request, ctx context.Context, db *mongo.Database, code string) {
@@ -146,7 +174,8 @@ func readPageHandler(w http.ResponseWriter, r *http.Request, ctx context.Context
 	var result PostRecord
 	err = postsCollection.FindOne(ctx, bson.M{"code": code}).Decode(&result)
 	if err != nil {
-		http.Redirect(w, r, basePath+"/", 302)
+		err = nil
+		send404ServerError(w)
 		return
 	}
 
