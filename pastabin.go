@@ -73,6 +73,8 @@ func router(w http.ResponseWriter, r *http.Request) {
 
 	if subPath == "/post" {
 		postHandler(w, r, ctx, database)
+	} else if strings.HasPrefix(subPath, "/attachment/") {
+		getAttachmentHandler(w, r, ctx, database, subPath[12:len(subPath)])
 	} else if subPath[0] == '/' && len(subPath) == 7 {
 		readPageHandler(w, r, ctx, database, subPath[1:7])
 	} else {
@@ -94,6 +96,40 @@ func randSeq(n int) string {
 func sendInternalServerError(w http.ResponseWriter) {
 	w.WriteHeader(500)
 	fmt.Fprintf(w, "internal server error")
+}
+
+func getAttachmentHandler(w http.ResponseWriter, r *http.Request, ctx context.Context, db *mongo.Database, code string) {
+	var err error = nil
+
+	defer func() {
+		if err != nil {
+			sendInternalServerError(w)
+		}
+	}()
+
+	postsCollection := db.Collection("posts")
+	var result PostRecord
+	err = postsCollection.FindOne(ctx, bson.M{"code": code}).Decode(&result)
+	if err != nil {
+		return
+	}
+
+	haveContentType := false
+	contentTypes, ok := result.AttachmentHeader.Header["Content-Type"];
+	if ok && len(contentTypes) < 1 {
+		contentType := contentTypes[0]
+		if contentType != "image/png" {
+			w.Header().Set("Context-Type", contentType)
+			haveContentType = true
+		}
+	}
+
+	if !haveContentType {
+		w.Header().Set("Context-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", "attachment; filename=\"" + result.AttachmentHeader.Filename + "\"")
+	}
+
+	w.Write(result.Attachment)
 }
 
 func readPageHandler(w http.ResponseWriter, r *http.Request, ctx context.Context, db *mongo.Database, code string) {
@@ -123,12 +159,22 @@ func readPageHandler(w http.ResponseWriter, r *http.Request, ctx context.Context
 	}
 
 	data := struct {
-		BasePath string
-		Text     string
+		BasePath     string
+		Text         string
+		Filename     string
+		DownloadPath template.URL
 	}{
-		BasePath: basePath,
-		Text:     result.Text,
+		BasePath:   basePath,
+		Text:       result.Text,
 	}
+
+	if result.AttachmentHeader != nil {
+
+		data.Filename = result.AttachmentHeader.Filename
+		data.DownloadPath = template.URL(basePath + "/attachment/" + code)
+
+	}
+
 	err = t.Execute(w, data)
 	if err != nil {
 		return

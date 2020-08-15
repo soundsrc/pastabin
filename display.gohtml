@@ -1,10 +1,22 @@
 {{template "header"}}
 
+<div><a href="{{.BasePath}}/">&NestedLessLess; Main Page</a>
 <div id="content">
 <pre>
 {{.Text}}
 </pre>
 </div>
+{{if 1}} 
+  <div id="content">
+    <image src="{{.DownloadPath}}" />
+  </div>
+{{end}}
+{{if 1}} 
+  <div id="attachment">
+    Download:<br />
+    <a href="{{.DownloadPath}}">{{.Filename}}</a>
+  </div>
+{{end}}
 </form>
 
 {{template "footer"}}
