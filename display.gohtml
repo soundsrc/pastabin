@@ -1,20 +1,33 @@
 {{template "header"}}
 
 <div><a href="{{.BasePath}}/">&NestedLessLess; Main Page</a>
-<div id="content">
-<pre>
-{{.Text}}
-</pre>
-</div>
-{{if 1}} 
+{{if .Text}} 
   <div id="content">
-    <image src="{{.DownloadPath}}" />
+  <pre>{{.Text}}</pre>
   </div>
 {{end}}
-{{if 1}} 
+{{if .InlineImage}} 
+  <div id="content">
+    <image id="inlineimage" src="{{.AttachmentPath}}" />
+  </div>
+{{end}}
+{{if .InlineAudio}} 
+  <div id="content">
+    <audio controls>
+      <source src="{{.AttachmentPath}}" />
+    </audio>
+  </div>
+{{end}}
+{{if .InlineVideo}} 
+  <video controls>
+    <source src="{{.AttachmentPath}}" />
+  </video>
+  </div>
+{{end}}
+{{if .AttachmentPath}} 
   <div id="attachment">
     Download:<br />
-    <a href="{{.DownloadPath}}">{{.Filename}}</a>
+    <a href="{{.AttachmentPath}}">{{.Filename}}</a>
   </div>
 {{end}}
 </form>

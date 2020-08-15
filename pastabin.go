@@ -118,16 +118,14 @@ func getAttachmentHandler(w http.ResponseWriter, r *http.Request, ctx context.Co
 	contentTypes, ok := result.AttachmentHeader.Header["Content-Type"];
 	if ok && len(contentTypes) < 1 {
 		contentType := contentTypes[0]
-		if contentType != "image/png" {
-			w.Header().Set("Context-Type", contentType)
-			haveContentType = true
-		}
+		w.Header().Set("Context-Type", contentType)
+		haveContentType = true
 	}
 
 	if !haveContentType {
 		w.Header().Set("Context-Type", "application/octet-stream")
-		w.Header().Set("Content-Disposition", "attachment; filename=\"" + result.AttachmentHeader.Filename + "\"")
 	}
+	w.Header().Set("Content-Disposition", "attachment; filename=\"" + result.AttachmentHeader.Filename + "\"")
 
 	w.Write(result.Attachment)
 }
@@ -159,20 +157,56 @@ func readPageHandler(w http.ResponseWriter, r *http.Request, ctx context.Context
 	}
 
 	data := struct {
-		BasePath     string
-		Text         string
-		Filename     string
-		DownloadPath template.URL
+		BasePath       string
+		Text           string
+		Filename       string
+		InlineImage    bool
+		InlineAudio    bool
+		InlineVideo    bool
+		AttachmentPath template.URL
 	}{
-		BasePath:   basePath,
-		Text:       result.Text,
+		BasePath:    basePath,
+		Text:        result.Text,
+		InlineImage: false,
+		InlineAudio: false,
+		InlineVideo: false,
 	}
 
 	if result.AttachmentHeader != nil {
 
 		data.Filename = result.AttachmentHeader.Filename
-		data.DownloadPath = template.URL(basePath + "/attachment/" + code)
+		data.AttachmentPath = template.URL(basePath + "/attachment/" + code)
 
+		if contentTypes, ok := result.AttachmentHeader.Header["Content-Type"]; ok && len(contentTypes) >= 1 {
+			contentType := contentTypes[0]
+			switch contentType {
+				case
+					"image/png",
+					"image/jpeg",
+					"image/gif",
+					"image/bmp",
+					"image/tuff",
+					"image/svg":
+					data.InlineImage = true
+				case 
+					"audio/aac",
+					"audio/midi",
+					"audio/x-midi",
+					"audio/mp3",
+					"audio/ogg",
+					"audio/opus",
+					"audio/wav":
+					data.InlineAudio = true
+				case
+					"video/x-msvideo",
+					"video/mpeg",
+					"video/mp4",
+					"video/quicktime",
+					"video/webm",
+					"video/wx-ms-wmv":
+					data.InlineVideo = true
+			}
+		}
 	}
 
 	err = t.Execute(w, data)
