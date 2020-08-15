@@ -281,6 +281,11 @@ func postHandler(w http.ResponseWriter, r *http.Request, ctx context.Context, db
 		return
 	}
 
+	// enforce max expire time
+	if expire > 86400 {
+		return
+	}
+
 	code := randSeq(6)
 	postsCollection := db.Collection("posts")
 
