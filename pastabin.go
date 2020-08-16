@@ -24,8 +24,10 @@ import (
 )
 
 type Options struct {
-	BasePath   string
-	Debug      bool
+	BasePath     string
+	Debug        bool
+	RateLimit    time.Duration
+	BanDuration  time.Duration
 }
 
 type PostRecord struct {
@@ -53,15 +55,17 @@ func main() {
 
 	portFlag := flag.String("p", "127.0.0.1:9000", "Bind address/port or socket")
 	socketFlag := flag.String("s", "", "Socket path (overrides port)")
-	basePathFlag := flag.String("b", "", "Base path")
-	debugFlag := flag.Bool("d", false, "Verbose debugging")
+	flag.StringVar(&globalOptions.BasePath, "b", "", "Base path")
+	flag.BoolVar(&globalOptions.Debug, "d", false, "Verbose debugging")
+	rateLimitSecFlag := flag.Int("r", 10, "Rate limit (second)")
+	banDurationDaysFlag := flag.Int("x", 90, "Ban duration (days)")
 
 	flag.Parse()
 
-	globalOptions.BasePath = *basePathFlag
-	globalOptions.Debug = *debugFlag
+	globalOptions.RateLimit = time.Second * time.Duration(*rateLimitSecFlag)
+	globalOptions.BanDuration = time.Hour * time.Duration(24 * *banDurationDaysFlag)
 
-	http.HandleFunc(globalOptions.BasePath+"/", router)
+	http.HandleFunc(globalOptions.BasePath + "/", router)
 
 	var listener net.Listener
 	var err error
@@ -134,7 +138,7 @@ func router(w http.ResponseWriter, r *http.Request) {
 	if strings.Contains(path, ".php") {
 		visitorRecord.Banned = true
 		visitorRecord.LastAccessDate = time.Now()
-		visitorRecord.ExpireDate = time.Now().AddDate(0, 3, 0) // 3-month ban
+		visitorRecord.ExpireDate = time.Now().Add(globalOptions.BanDuration)
 
 		var upsert bool = true
 		_, err = visitorsCollection.ReplaceOne(ctx, bson.M{"_id": visitorRecord.ID}, visitorRecord, &options.ReplaceOptions{ Upsert: &upsert })
@@ -167,11 +171,11 @@ Disallow: /form/posts.php`
 	if subPath == "/post" {
 
 		// enforce rate limit
-		elapsedSeconds := time.Now().Sub(visitorRecord.LastAccessDate).Seconds()
-		if elapsedSeconds < 10.0 {
+		elapsedSeconds := time.Now().Sub(visitorRecord.LastAccessDate)
+		if elapsedSeconds < globalOptions.RateLimit {
 			_ = r.ParseMultipartForm(4 * 1024 * 1024) // can we skip this bit?
 			w.WriteHeader(403)
-			fmt.Fprintf(w, "Rate limit exceeded. Please wait %d seconds.", int(10.0 - elapsedSeconds))
+			fmt.Fprintf(w, "Rate limit exceeded. Please wait %d seconds.", int((globalOptions.RateLimit - elapsedSeconds).Seconds()))
 			return
 		}
 
