@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -22,7 +23,10 @@ import (
 	"time"
 )
 
-var basePath string = "/pastabin"
+type Options struct {
+	BasePath   string
+	Debug      bool
+}
 
 type PostRecord struct {
 	ID               primitive.ObjectID    `json:"ID" bson:"_id,omitempty"`
@@ -41,18 +45,38 @@ type VisitorRecord struct {
 	ExpireDate       time.Time             `json:"expireDate" bson:"expireDate"`
 }
 
+var globalOptions Options
+
 func main() {
 
 	rand.Seed(time.Now().UnixNano())
 
-	http.HandleFunc(basePath+"/", router)
+	portFlag := flag.String("p", "127.0.0.1:9000", "Bind address/port or socket")
+	socketFlag := flag.String("s", "", "Socket path (overrides port)")
+	basePathFlag := flag.String("b", "", "Base path")
+	debugFlag := flag.Bool("d", false, "Verbose debugging")
 
-	l, err := net.Listen("tcp", "127.0.0.1:9000")
-	if err != nil {
-		panic(err)
+	flag.Parse()
+
+	globalOptions.BasePath = *basePathFlag
+	globalOptions.Debug = *debugFlag
+
+	http.HandleFunc(globalOptions.BasePath+"/", router)
+
+	var listener net.Listener
+	var err error
+	if *socketFlag != "" {
+		if listener, err = net.Listen("unix", *socketFlag); err != nil {
+			panic(err)
+		}
+	} else {
+		if listener, err = net.Listen("tcp", *portFlag); err != nil {
+			panic(err)
+		}
 	}
+	defer listener.Close()
 
-	fcgi.Serve(l, nil)
+	fcgi.Serve(listener, nil)
 
 }
 
@@ -68,7 +92,7 @@ func router(w http.ResponseWriter, r *http.Request) {
 
 	path := r.URL.Path
 
-	if !strings.HasPrefix(path, basePath) {
+	if !strings.HasPrefix(path, globalOptions.BasePath) {
 		w.WriteHeader(404)
 		fmt.Fprintf(w, "Not found.")
 		return
@@ -122,7 +146,7 @@ func router(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	subPath := path[len(basePath):len(path)]
+	subPath := path[len(globalOptions.BasePath):len(path)]
 
 	if subPath == "/robots.txt" {
 		robotsTxt := `
@@ -196,7 +220,11 @@ func randSeq(n int) string {
 
 func sendInternalServerError(w http.ResponseWriter, err error) {
 	w.WriteHeader(500)
-	fmt.Fprintf(w, "Internal server error: %s", err)
+	if globalOptions.Debug {
+		fmt.Fprintf(w, "Internal server error: %s", err)
+	} else {
+		fmt.Fprintf(w, "Internal server error")
+	}
 }
 
 func send404ServerError(w http.ResponseWriter) {
@@ -277,7 +305,7 @@ func readPageHandler(w http.ResponseWriter, r *http.Request, ctx context.Context
 		InlineVideo    bool
 		AttachmentPath template.URL
 	}{
-		BasePath:    basePath,
+		BasePath:    globalOptions.BasePath,
 		Text:        result.Text,
 		InlineImage: false,
 		InlineAudio: false,
@@ -287,7 +315,7 @@ func readPageHandler(w http.ResponseWriter, r *http.Request, ctx context.Context
 	if result.AttachmentHeader != nil {
 
 		data.Filename = result.AttachmentHeader.Filename
-		data.AttachmentPath = template.URL(basePath + "/attachment/" + code)
+		data.AttachmentPath = template.URL(globalOptions.BasePath + "/attachment/" + code)
 
 		if contentTypes, ok := result.AttachmentHeader.Header["Content-Type"]; ok && len(contentTypes) >= 1 {
 			contentType := contentTypes[0]
@@ -350,7 +378,7 @@ func defaultPageHandler(w http.ResponseWriter, r *http.Request, ctx context.Cont
 	data := struct {
 		BasePath string
 	}{
-		BasePath: basePath,
+		BasePath: globalOptions.BasePath,
 	}
 	err = t.Execute(w, data)
 	if err != nil {
@@ -416,5 +444,5 @@ func postHandler(w http.ResponseWriter, r *http.Request, ctx context.Context, db
 		return
 	}
 
-	http.Redirect(w, r, basePath+"/"+code, 302)
+	http.Redirect(w, r, globalOptions.BasePath+"/"+code, 302)
 }
