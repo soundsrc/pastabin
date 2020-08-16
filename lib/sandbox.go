@@ -2,6 +2,6 @@
 
 package lib
 
-func Sandbox() error {
+func Sandbox(socketPath string) error {
 	return nil
 }

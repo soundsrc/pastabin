@@ -18,6 +18,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/fcgi"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -71,7 +72,11 @@ func main() {
 	var listener net.Listener
 	var err error
 	if *socketFlag != "" {
+		os.Remove(*socketFlag)
 		if listener, err = net.Listen("unix", *socketFlag); err != nil {
+			panic(err)
+		}
+		if err = os.Chmod(*socketFlag, 0660); err != nil {
 			panic(err)
 		}
 	} else {
@@ -81,7 +86,7 @@ func main() {
 	}
 	defer listener.Close()
 
- 	if err = lib.Sandbox(); err != nil {
+	if err = lib.Sandbox(*socketFlag); err != nil {
 		 panic(err)
 	}
 
@@ -107,7 +112,7 @@ func router(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	client, err := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://localhost:27017"))
 	defer client.Disconnect(ctx)
@@ -374,6 +379,7 @@ func defaultPageHandler(w http.ResponseWriter, r *http.Request, ctx context.Cont
 			sendInternalServerError(w, err)
 		}
 	}()
+
 
 	t, err := template.New("main.gohtml").ParseFiles(
 		"main.gohtml",
