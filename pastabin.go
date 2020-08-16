@@ -149,8 +149,7 @@ func router(w http.ResponseWriter, r *http.Request) {
 	subPath := path[len(globalOptions.BasePath):len(path)]
 
 	if subPath == "/robots.txt" {
-		robotsTxt := `
-User-agent: *
+		robotsTxt := `User-agent: *
 Disallow: /
 Disallow: /form/posts.php`
 		w.Header().Set("Content-Type", "text/plain")
