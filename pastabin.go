@@ -3,7 +3,11 @@ package main
 import (
 	"./lib"
 	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
+	cryptorand "crypto/rand"
 	"context"
+	"encoding/binary"
 	"errors"
 	"flag"
 	"fmt"
@@ -32,12 +36,17 @@ type Options struct {
 	BanDuration  time.Duration
 }
 
-type PostRecord struct {
-	ID               primitive.ObjectID    `json:"ID" bson:"_id,omitempty"`
-	Code             string                `json:"code" bson:"code"`
+type EncryptedPostRecord struct {
 	Text             string                `json:"text" bson:"text,omitempty"`
 	Attachment       []byte                `json:"attachment" bson:"attachment,omitempty"`
 	AttachmentHeader *multipart.FileHeader `json:"attachmentHeader" bson:"attachmentHeader,omitempty"`
+}
+
+type PostRecord struct {
+	ID               primitive.ObjectID    `json:"ID" bson:"_id,omitempty"`
+	Code             string                `json:"code" bson:"code"`
+	EncID            uint32                `json:"encID" bson:"encID"`
+	Data             []byte                `json:"data" bson:"data"`
 	ExpireDate       time.Time             `json:"expireDate" bson:"expireDate"`
 }
 
@@ -49,7 +58,116 @@ type VisitorRecord struct {
 	ExpireDate       time.Time             `json:"expireDate" bson:"expireDate"`
 }
 
-var globalOptions Options
+type CryptoKey struct {
+	Key              []byte
+	ExpireDate       time.Time
+}
+
+var globalOptions     Options
+var globalEncKeyMap   map[uint32]*CryptoKey = nil
+
+func purgeExpiredEncryptionKeys() {
+
+	// Remove expired keys
+	for id, key := range globalEncKeyMap {
+		if time.Now().After(key.ExpireDate) {
+
+			// zero memory
+			for i := 0; i < 32; i++ {
+				key.Key[i] = 0
+			}
+
+			if (globalOptions.Debug) {
+				fmt.Printf("Remove enc key: %u", id)
+			}
+
+			// remove from map
+			delete(globalEncKeyMap, id)
+		}
+	}
+
+}
+
+func findOrGenerateEncryptionKey(validityDate time.Time) (uint32, *CryptoKey, error) {
+
+	// check for valid keys, which must have an expiry date
+	for id, key := range globalEncKeyMap {
+		if validityDate.Before(key.ExpireDate) {
+			return id, key, nil
+		}
+	}
+
+	// generate new key
+	idBytes := make([]byte, 4)
+	if _, err := cryptorand.Read(idBytes); err != nil {
+		return 0, nil, err
+	}
+
+	id := binary.LittleEndian.Uint32(idBytes)
+	key := &CryptoKey{}
+	key.Key = make([]byte, 32)
+	if _, err := cryptorand.Read(key.Key); err != nil {
+		return 0, nil, err
+	}
+	key.ExpireDate = validityDate.Add(time.Hour * time.Duration(1))
+
+	if (globalOptions.Debug) {
+		fmt.Printf("Add enc key: %u\n", id)
+	}
+	if globalEncKeyMap == nil {
+		globalEncKeyMap = make(map[uint32]*CryptoKey)
+	}
+	globalEncKeyMap[id] = key
+
+	return id, key, nil
+}
+
+func encryptData(key, plainText []byte) ([]byte, error) {
+
+	aesCipher, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+
+	gcm, err := cipher.NewGCM(aesCipher)
+	if err != nil {
+		return nil, err
+	}
+
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err = rand.Read(nonce); err != nil {
+		return nil, err
+	}
+
+	cipherText := gcm.Seal(nonce, nonce, plainText, nil)
+
+	return cipherText, nil
+
+}
+
+func decryptData(key, nonceAndCipherText []byte) ([]byte, error) {
+
+	aesCipher, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+
+	gcm, err := cipher.NewGCM(aesCipher)
+	if err != nil {
+		return nil, err
+	}
+
+	nonce := nonceAndCipherText[0:gcm.NonceSize()]
+	cipherText := nonceAndCipherText[gcm.NonceSize():]
+
+	plainText, err := gcm.Open(nil, nonce, cipherText, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return plainText, nil
+
+}
 
 func main() {
 
@@ -89,6 +207,14 @@ func main() {
 	if err = lib.Sandbox(*socketFlag); err != nil {
 		 panic(err)
 	}
+
+	ticker := time.NewTicker(time.Minute * time.Duration(30))
+	go func() {
+        for {
+			<-ticker.C
+			purgeExpiredEncryptionKeys()
+        }
+    }()
 
 	fcgi.Serve(listener, nil)
 
@@ -266,8 +392,25 @@ func getAttachmentHandler(w http.ResponseWriter, r *http.Request, ctx context.Co
 		return
 	}
 
+	key, hasKey := globalEncKeyMap[result.EncID]
+	if !hasKey {
+		err = nil
+		send404ServerError(w)
+		return
+	}
+
+	decryptedData, err := decryptData(key.Key, result.Data)
+	if err != nil {
+		return
+	}
+
+	var record EncryptedPostRecord
+	if err = bson.Unmarshal(decryptedData, &record); err != nil {
+		return
+	}
+
 	haveContentType := false
-	contentTypes, ok := result.AttachmentHeader.Header["Content-Type"];
+	contentTypes, ok := record.AttachmentHeader.Header["Content-Type"];
 	if ok && len(contentTypes) < 1 {
 		contentType := contentTypes[0]
 		w.Header().Set("Context-Type", contentType)
@@ -277,9 +420,9 @@ func getAttachmentHandler(w http.ResponseWriter, r *http.Request, ctx context.Co
 	if !haveContentType {
 		w.Header().Set("Context-Type", "application/octet-stream")
 	}
-	w.Header().Set("Content-Disposition", "attachment; filename=\"" + result.AttachmentHeader.Filename + "\"")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"" + record.AttachmentHeader.Filename + "\"")
 
-	w.Write(result.Attachment)
+	w.Write(record.Attachment)
 }
 
 func readPageHandler(w http.ResponseWriter, r *http.Request, ctx context.Context, db *mongo.Database, code string) {
@@ -301,6 +444,23 @@ func readPageHandler(w http.ResponseWriter, r *http.Request, ctx context.Context
 		return
 	}
 
+	key, hasKey := globalEncKeyMap[result.EncID]
+	if !hasKey {
+		err = nil
+		send404ServerError(w)
+		return
+	}
+
+	decryptedData, err := decryptData(key.Key, result.Data)
+	if err != nil {
+		return
+	}
+
+	var record EncryptedPostRecord
+	if err = bson.Unmarshal(decryptedData, &record); err != nil {
+		return
+	}
+
 	t, err := template.New("display.gohtml").ParseFiles(
 		"display.gohtml",
 		"header.gohtml",
@@ -319,18 +479,18 @@ func readPageHandler(w http.ResponseWriter, r *http.Request, ctx context.Context
 		AttachmentPath template.URL
 	}{
 		BasePath:    globalOptions.BasePath,
-		Text:        result.Text,
+		Text:        record.Text,
 		InlineImage: false,
 		InlineAudio: false,
 		InlineVideo: false,
 	}
 
-	if result.AttachmentHeader != nil {
+	if record.AttachmentHeader != nil {
 
-		data.Filename = result.AttachmentHeader.Filename
+		data.Filename = record.AttachmentHeader.Filename
 		data.AttachmentPath = template.URL(globalOptions.BasePath + "/attachment/" + code)
 
-		if contentTypes, ok := result.AttachmentHeader.Header["Content-Type"]; ok && len(contentTypes) >= 1 {
+		if contentTypes, ok := record.AttachmentHeader.Header["Content-Type"]; ok && len(contentTypes) >= 1 {
 			contentType := contentTypes[0]
 			switch contentType {
 				case
@@ -444,13 +604,31 @@ func postHandler(w http.ResponseWriter, r *http.Request, ctx context.Context, db
 	code := randSeq(6)
 	postsCollection := db.Collection("posts")
 
-	data := PostRecord{
-		ID:               primitive.NewObjectID(),
-		Code:             code,
+	record := EncryptedPostRecord{
 		Text:             textInput,
 		Attachment:       attachment,
 		AttachmentHeader: header,
-		ExpireDate:       time.Now().Add(time.Second * time.Duration(expire)),
+	}
+
+	recordBytes, err := bson.Marshal(record)
+	if err != nil {
+		return
+	}
+
+	expireDate := time.Now().Add(time.Second * time.Duration(expire))
+	encID, key, err := findOrGenerateEncryptionKey(expireDate)
+	if err != nil {
+		return
+	}
+
+	encryptedData, err := encryptData(key.Key, recordBytes)
+
+	data := PostRecord{
+		ID:               primitive.NewObjectID(),
+		Code:             code,
+		EncID:            encID,
+		Data:             encryptedData,
+		ExpireDate:       expireDate,
 	}
 
 	_, err = postsCollection.InsertOne(ctx, data)
