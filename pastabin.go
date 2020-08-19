@@ -270,8 +270,9 @@ func router(w http.ResponseWriter, r *http.Request) {
 		err = nil
 	}
 
-	// if path contains stuff like .php or whatever, instaban
-	if strings.Contains(path, ".php") {
+	// if path contains stuff like .php or robots.txt, instaban
+	if strings.Contains(path, ".php") ||
+		strings.Contains(path, "robots.txt") {
 		visitorRecord.Banned = true
 		visitorRecord.LastAccessDate = time.Now()
 		visitorRecord.ExpireDate = time.Now().Add(globalOptions.BanDuration)
@@ -287,15 +288,6 @@ func router(w http.ResponseWriter, r *http.Request) {
 	}
 
 	subPath := path[len(globalOptions.BasePath):len(path)]
-
-	if subPath == "/robots.txt" {
-		robotsTxt := `User-agent: *
-Disallow: /
-Disallow: /form/posts.php`
-		w.Header().Set("Content-Type", "text/plain")
-		w.Write([]byte(robotsTxt))
-		return
-	}
 
 	if subPath == "/" {
 
