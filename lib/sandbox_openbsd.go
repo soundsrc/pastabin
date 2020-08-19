@@ -26,8 +26,12 @@ func Sandbox(socketPath string) error {
 	}
 
 	if err = unix.Unveil("/etc/resolv.conf", "r"); err != nil {
-                return err
-        }
+		return err
+	}
+
+	if err = unix.Unveil("/etc/hosts", "r"); err != nil {
+		return err
+	}
 
  	if err = unix.Unveil("/tmp", "rwc"); err != nil {
 		return err
@@ -35,8 +39,8 @@ func Sandbox(socketPath string) error {
 
 	if socketPath != "" {
 		if err = unix.Unveil(socketPath, "rwc"); err != nil {
-                	return err
-        	}
+			return err
+        }
 	}
 
 	if err = unix.Pledge("stdio inet rpath wpath cpath", ""); err != nil {
