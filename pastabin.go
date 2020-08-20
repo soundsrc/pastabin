@@ -364,7 +364,7 @@ func send404ServerError(w http.ResponseWriter) {
 }
 
 func send403ServerError(w http.ResponseWriter) {
-	w.WriteHeader(404)
+	w.WriteHeader(403)
 	fmt.Fprintf(w, "Access denied")
 }
 
