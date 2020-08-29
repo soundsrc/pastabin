@@ -238,9 +238,17 @@ func router(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var mongoURI string
+	mongoUserPassword, ok := os.LookupEnv("MONGO_USERPW")
+	if ok {
+		mongoURI = fmt.Sprintf("mongodb://%s@localhost:27017", mongoUserPassword)
+	}  else {
+		mongoURI = "mongodb://localhost:27017"
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://localhost:27017"))
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
 	defer client.Disconnect(ctx)
 
 	database := client.Database("pastabin")
