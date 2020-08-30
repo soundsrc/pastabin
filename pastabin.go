@@ -78,7 +78,7 @@ func purgeExpiredEncryptionKeys() {
 			}
 
 			if globalOptions.Debug {
-				fmt.Printf("Remove enc key: %u", id)
+				fmt.Printf("Remove enc key: %d", id)
 			}
 
 			// remove from map
@@ -112,7 +112,7 @@ func findOrGenerateEncryptionKey(validityDate time.Time) (uint32, *CryptoKey, er
 	key.ExpireDate = validityDate.Add(time.Hour * time.Duration(1))
 
 	if globalOptions.Debug {
-		fmt.Printf("Add enc key: %u\n", id)
+		fmt.Printf("Add enc key: %d\n", id)
 	}
 	if globalEncKeyMap == nil {
 		globalEncKeyMap = make(map[uint32]*CryptoKey)
@@ -322,7 +322,7 @@ func router(w http.ResponseWriter, r *http.Request) {
 		visitorRecord.LastAccessDate = time.Now()
 		visitorRecord.ExpireDate = time.Now().Add(globalOptions.BanDuration)
 
-		var upsert bool = true
+		var upsert = true
 		_, err = visitorsCollection.ReplaceOne(ctx, bson.M{"_id": visitorRecord.ID}, visitorRecord, &options.ReplaceOptions{Upsert: &upsert})
 		if err != nil {
 			return
@@ -344,18 +344,18 @@ func router(w http.ResponseWriter, r *http.Request) {
 	if subPath == "/post" {
 
 		// enforce rate limit
-		elapsedSeconds := time.Now().Sub(visitorRecord.LastAccessDate)
-		if elapsedSeconds < globalOptions.RateLimit {
+		elapsedTime := time.Now().Sub(visitorRecord.LastAccessDate)
+		if elapsedTime < globalOptions.RateLimit {
 			_ = r.ParseMultipartForm(4 * 1024 * 1024) // can we skip this bit?
 			w.WriteHeader(403)
-			fmt.Fprintf(w, "Rate limit exceeded. Please wait %d seconds.", int((globalOptions.RateLimit - elapsedSeconds).Seconds()))
+			fmt.Fprintf(w, "Rate limit exceeded. Please wait %d seconds.", int((globalOptions.RateLimit - elapsedTime).Seconds()))
 			return
 		}
 
 		visitorRecord.LastAccessDate = time.Now()
 		visitorRecord.ExpireDate = time.Now().Add(time.Hour * time.Duration(2)) // don't need to keep record around
 
-		var upsert bool = true
+		var upsert = true
 		_, err = visitorsCollection.ReplaceOne(ctx, bson.M{"_id": visitorRecord.ID}, visitorRecord, &options.ReplaceOptions{Upsert: &upsert})
 		if err != nil {
 			return
@@ -612,7 +612,7 @@ func postHandler(w http.ResponseWriter, r *http.Request, ctx context.Context, db
 		return
 	}
 
-	attachment := []byte{}
+	attachment := make([]byte, 0)
 
 	file, header, err := r.FormFile("file")
 	if err == nil {
