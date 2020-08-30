@@ -216,7 +216,9 @@ func main() {
 		}
 	}()
 
-	fcgi.Serve(listener, nil)
+	if err = fcgi.Serve(listener, nil); err != nil {
+		panic(err)
+	}
 
 }
 
@@ -290,7 +292,7 @@ func router(w http.ResponseWriter, r *http.Request) {
 
 	remoteAddrPort := strings.Split(r.RemoteAddr, ":")
 	if len(remoteAddrPort) == 0 {
-		err = errors.New("Unable to determine remote addr")
+		err = errors.New("unable to determine remote addr")
 		return
 	}
 	ipAddr := strings.Join(remoteAddrPort[0:len(remoteAddrPort)-1], ":")
@@ -330,7 +332,7 @@ func router(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	subPath := path[len(globalOptions.BasePath):len(path)]
+	subPath := path[len(globalOptions.BasePath):]
 
 	if subPath == "/" {
 
