@@ -3,10 +3,10 @@ package main
 import (
 	"./lib"
 	"bytes"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	cryptorand "crypto/rand"
-	"context"
 	"encoding/binary"
 	"errors"
 	"flag"
@@ -30,10 +30,10 @@ import (
 )
 
 type Options struct {
-	BasePath     string
-	Debug        bool
-	RateLimit    time.Duration
-	BanDuration  time.Duration
+	BasePath    string
+	Debug       bool
+	RateLimit   time.Duration
+	BanDuration time.Duration
 }
 
 type EncryptedPostRecord struct {
@@ -43,28 +43,28 @@ type EncryptedPostRecord struct {
 }
 
 type PostRecord struct {
-	ID               primitive.ObjectID    `json:"ID" bson:"_id,omitempty"`
-	Code             string                `json:"code" bson:"code"`
-	EncID            uint32                `json:"encID" bson:"encID"`
-	Data             []byte                `json:"data" bson:"data"`
-	ExpireDate       time.Time             `json:"expireDate" bson:"expireDate"`
+	ID         primitive.ObjectID `json:"ID" bson:"_id,omitempty"`
+	Code       string             `json:"code" bson:"code"`
+	EncID      uint32             `json:"encID" bson:"encID"`
+	Data       []byte             `json:"data" bson:"data"`
+	ExpireDate time.Time          `json:"expireDate" bson:"expireDate"`
 }
 
 type VisitorRecord struct {
-	ID               primitive.ObjectID    `json:"ID" bson:"_id,omitempty"`
-	RemoteAddr       string                `json:"remoteAddr" bson:"remoteAddr"`
-	Banned           bool                  `json:"banned" bson:"banned"`
-	LastAccessDate   time.Time             `json:"lastAccessDate" bson:"lastAccessDate"`
-	ExpireDate       time.Time             `json:"expireDate" bson:"expireDate"`
+	ID             primitive.ObjectID `json:"ID" bson:"_id,omitempty"`
+	RemoteAddr     string             `json:"remoteAddr" bson:"remoteAddr"`
+	Banned         bool               `json:"banned" bson:"banned"`
+	LastAccessDate time.Time          `json:"lastAccessDate" bson:"lastAccessDate"`
+	ExpireDate     time.Time          `json:"expireDate" bson:"expireDate"`
 }
 
 type CryptoKey struct {
-	Key              []byte
-	ExpireDate       time.Time
+	Key        []byte
+	ExpireDate time.Time
 }
 
-var globalOptions     Options
-var globalEncKeyMap   map[uint32]*CryptoKey = nil
+var globalOptions Options
+var globalEncKeyMap map[uint32]*CryptoKey = nil
 
 func purgeExpiredEncryptionKeys() {
 
@@ -77,7 +77,7 @@ func purgeExpiredEncryptionKeys() {
 				key.Key[i] = 0
 			}
 
-			if (globalOptions.Debug) {
+			if globalOptions.Debug {
 				fmt.Printf("Remove enc key: %u", id)
 			}
 
@@ -111,7 +111,7 @@ func findOrGenerateEncryptionKey(validityDate time.Time) (uint32, *CryptoKey, er
 	}
 	key.ExpireDate = validityDate.Add(time.Hour * time.Duration(1))
 
-	if (globalOptions.Debug) {
+	if globalOptions.Debug {
 		fmt.Printf("Add enc key: %u\n", id)
 	}
 	if globalEncKeyMap == nil {
@@ -183,9 +183,9 @@ func main() {
 	flag.Parse()
 
 	globalOptions.RateLimit = time.Second * time.Duration(*rateLimitSecFlag)
-	globalOptions.BanDuration = time.Hour * time.Duration(24 * *banDurationDaysFlag)
+	globalOptions.BanDuration = time.Hour * time.Duration(24**banDurationDaysFlag)
 
-	http.HandleFunc(globalOptions.BasePath + "/", router)
+	http.HandleFunc(globalOptions.BasePath+"/", router)
 
 	var listener net.Listener
 	var err error
@@ -205,16 +205,16 @@ func main() {
 	defer listener.Close()
 
 	if err = lib.Sandbox(*socketFlag); err != nil {
-		 panic(err)
+		panic(err)
 	}
 
 	ticker := time.NewTicker(time.Minute * time.Duration(30))
 	go func() {
-        for {
+		for {
 			<-ticker.C
 			purgeExpiredEncryptionKeys()
-        }
-    }()
+		}
+	}()
 
 	fcgi.Serve(listener, nil)
 
@@ -238,23 +238,58 @@ func router(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var mongoURI string
-	mongoUserPassword, ok := os.LookupEnv("MONGO_USERPW")
-	if ok {
-		mongoURI = fmt.Sprintf("mongodb://%s@localhost:27017", mongoUserPassword)
-	}  else {
-		mongoURI = "mongodb://localhost:27017"
+	mongoHost, ok := os.LookupEnv("MONGO_HOST")
+	if !ok {
+		mongoHost = "localhost"
 	}
+
+	mongoPort := 27017
+	mongoPortString, ok := os.LookupEnv("MONGO_PORT")
+	if ok {
+		mongoPort, err = strconv.Atoi(mongoPortString)
+		if err != nil {
+			return
+		}
+	}
+
+	mongoUsername, ok := os.LookupEnv("MONGO_USERNAME")
+	if !ok {
+		mongoUsername = ""
+	}
+
+	mongoPassword, ok := os.LookupEnv("MONGO_PASSWORD")
+	if !ok {
+		mongoPassword = ""
+	}
+
+	mongoUserPassword := ""
+	if mongoUsername != "" {
+		mongoUserPassword += mongoUsername
+	}
+
+	if mongoPassword != "" {
+		mongoUserPassword += ":" + mongoPassword
+	}
+
+	if mongoUserPassword != "" {
+		mongoUserPassword += "@"
+	}
+
+	mongoURI := fmt.Sprintf("mongodb://%s%s:%d/?authSource=pastabin", mongoUserPassword, mongoHost, mongoPort)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	client, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
+	if err != nil {
+		return
+	}
+
 	defer client.Disconnect(ctx)
 
 	database := client.Database("pastabin")
 
 	remoteAddrPort := strings.Split(r.RemoteAddr, ":")
-	if (len(remoteAddrPort) == 0) {
+	if len(remoteAddrPort) == 0 {
 		err = errors.New("Unable to determine remote addr")
 		return
 	}
@@ -262,9 +297,9 @@ func router(w http.ResponseWriter, r *http.Request) {
 
 	visitorsCollection := database.Collection("visitors")
 	visitorRecord := VisitorRecord{
-		ID: primitive.NewObjectID(),
-		Banned: false,
-		RemoteAddr: ipAddr,
+		ID:             primitive.NewObjectID(),
+		Banned:         false,
+		RemoteAddr:     ipAddr,
 		LastAccessDate: time.Time{},
 	}
 
@@ -286,7 +321,7 @@ func router(w http.ResponseWriter, r *http.Request) {
 		visitorRecord.ExpireDate = time.Now().Add(globalOptions.BanDuration)
 
 		var upsert bool = true
-		_, err = visitorsCollection.ReplaceOne(ctx, bson.M{"_id": visitorRecord.ID}, visitorRecord, &options.ReplaceOptions{ Upsert: &upsert })
+		_, err = visitorsCollection.ReplaceOne(ctx, bson.M{"_id": visitorRecord.ID}, visitorRecord, &options.ReplaceOptions{Upsert: &upsert})
 		if err != nil {
 			return
 		}
@@ -302,8 +337,8 @@ func router(w http.ResponseWriter, r *http.Request) {
 		defaultPageHandler(w, r, ctx, database)
 		return
 
-	} 
-	
+	}
+
 	if subPath == "/post" {
 
 		// enforce rate limit
@@ -319,7 +354,7 @@ func router(w http.ResponseWriter, r *http.Request) {
 		visitorRecord.ExpireDate = time.Now().Add(time.Hour * time.Duration(2)) // don't need to keep record around
 
 		var upsert bool = true
-		_, err = visitorsCollection.ReplaceOne(ctx, bson.M{"_id": visitorRecord.ID}, visitorRecord, &options.ReplaceOptions{ Upsert: &upsert })
+		_, err = visitorsCollection.ReplaceOne(ctx, bson.M{"_id": visitorRecord.ID}, visitorRecord, &options.ReplaceOptions{Upsert: &upsert})
 		if err != nil {
 			return
 		}
@@ -327,22 +362,22 @@ func router(w http.ResponseWriter, r *http.Request) {
 		postHandler(w, r, ctx, database)
 		return
 
-	} 
-	
+	}
+
 	expr := regexp.MustCompile("/attachment/([A-Za-z0-9]{6})$")
 	matches := expr.FindAllStringSubmatch(subPath, -1)
-	if (len(matches) > 0) {
+	if len(matches) > 0 {
 		getAttachmentHandler(w, r, ctx, database, matches[0][1])
 		return
 	}
 
 	expr = regexp.MustCompile("/([A-Za-z0-9]{6})$")
 	matches = expr.FindAllStringSubmatch(subPath, -1)
-	if (len(matches) > 0) {
+	if len(matches) > 0 {
 		readPageHandler(w, r, ctx, database, subPath[1:7])
 		return
 	}
-	
+
 	send404ServerError(w)
 }
 
@@ -410,7 +445,7 @@ func getAttachmentHandler(w http.ResponseWriter, r *http.Request, ctx context.Co
 	}
 
 	haveContentType := false
-	contentTypes, ok := record.AttachmentHeader.Header["Content-Type"];
+	contentTypes, ok := record.AttachmentHeader.Header["Content-Type"]
 	if ok && len(contentTypes) < 1 {
 		contentType := contentTypes[0]
 		w.Header().Set("Context-Type", contentType)
@@ -420,7 +455,7 @@ func getAttachmentHandler(w http.ResponseWriter, r *http.Request, ctx context.Co
 	if !haveContentType {
 		w.Header().Set("Context-Type", "application/octet-stream")
 	}
-	w.Header().Set("Content-Disposition", "attachment; filename=\"" + record.AttachmentHeader.Filename + "\"")
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+record.AttachmentHeader.Filename+"\"")
 
 	w.Write(record.Attachment)
 }
@@ -493,32 +528,32 @@ func readPageHandler(w http.ResponseWriter, r *http.Request, ctx context.Context
 		if contentTypes, ok := record.AttachmentHeader.Header["Content-Type"]; ok && len(contentTypes) >= 1 {
 			contentType := contentTypes[0]
 			switch contentType {
-				case
-					"image/png",
-					"image/jpeg",
-					"image/gif",
-					"image/bmp",
-					"image/tuff",
-					"image/svg":
-					data.InlineImage = true
-				case 
-					"audio/aac",
-					"audio/midi",
-					"audio/x-midi",
-					"audio/mpeg",
-					"audio/mp3",
-					"audio/ogg",
-					"audio/opus",
-					"audio/wav":
-					data.InlineAudio = true
-				case
-					"video/x-msvideo",
-					"video/mpeg",
-					"video/mp4",
-					"video/quicktime",
-					"video/webm",
-					"video/wx-ms-wmv":
-					data.InlineVideo = true
+			case
+				"image/png",
+				"image/jpeg",
+				"image/gif",
+				"image/bmp",
+				"image/tuff",
+				"image/svg":
+				data.InlineImage = true
+			case
+				"audio/aac",
+				"audio/midi",
+				"audio/x-midi",
+				"audio/mpeg",
+				"audio/mp3",
+				"audio/ogg",
+				"audio/opus",
+				"audio/wav":
+				data.InlineAudio = true
+			case
+				"video/x-msvideo",
+				"video/mpeg",
+				"video/mp4",
+				"video/quicktime",
+				"video/webm",
+				"video/wx-ms-wmv":
+				data.InlineVideo = true
 			}
 		}
 	}
@@ -539,7 +574,6 @@ func defaultPageHandler(w http.ResponseWriter, r *http.Request, ctx context.Cont
 			sendInternalServerError(w, err)
 		}
 	}()
-
 
 	t, err := template.New("main.gohtml").ParseFiles(
 		"main.gohtml",
@@ -624,11 +658,11 @@ func postHandler(w http.ResponseWriter, r *http.Request, ctx context.Context, db
 	encryptedData, err := encryptData(key.Key, recordBytes)
 
 	data := PostRecord{
-		ID:               primitive.NewObjectID(),
-		Code:             code,
-		EncID:            encID,
-		Data:             encryptedData,
-		ExpireDate:       expireDate,
+		ID:         primitive.NewObjectID(),
+		Code:       code,
+		EncID:      encID,
+		Data:       encryptedData,
+		ExpireDate: expireDate,
 	}
 
 	_, err = postsCollection.InsertOne(ctx, data)
