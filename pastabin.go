@@ -632,8 +632,14 @@ func postHandler(w http.ResponseWriter, r *http.Request, ctx context.Context, db
 		return
 	}
 
+	if len(textInput) == 0 && len(attachment) == 0 {
+		http.Redirect(w, r, globalOptions.BasePath+"/", 302)
+		return
+	}
+
 	// enforce max expire time
 	if expire > 86400 {
+		err = errors.New("invalid expire time")
 		return
 	}
 
