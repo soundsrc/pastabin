@@ -6,7 +6,7 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
-	cryptorand "crypto/rand"
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"flag"
@@ -17,7 +17,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"html/template"
 	"io"
-	"math/rand"
+	"math/big"
 	"mime/multipart"
 	"net"
 	"net/http"
@@ -99,14 +99,14 @@ func findOrGenerateEncryptionKey(validityDate time.Time) (uint32, *CryptoKey, er
 
 	// generate new key
 	idBytes := make([]byte, 4)
-	if _, err := cryptorand.Read(idBytes); err != nil {
+	if _, err := rand.Read(idBytes); err != nil {
 		return 0, nil, err
 	}
 
 	id := binary.LittleEndian.Uint32(idBytes)
 	key := &CryptoKey{}
 	key.Key = make([]byte, 32)
-	if _, err := cryptorand.Read(key.Key); err != nil {
+	if _, err := rand.Read(key.Key); err != nil {
 		return 0, nil, err
 	}
 	key.ExpireDate = validityDate.Add(time.Hour * time.Duration(1))
@@ -170,8 +170,6 @@ func decryptData(key, nonceAndCipherText []byte) ([]byte, error) {
 }
 
 func main() {
-
-	rand.Seed(time.Now().UnixNano())
 
 	portFlag := flag.String("p", "127.0.0.1:9000", "Bind address/port or socket")
 	socketFlag := flag.String("s", "", "Socket path (overrides port)")
@@ -386,12 +384,27 @@ func router(w http.ResponseWriter, r *http.Request) {
 // https://stackoverflow.com/questions/22892120/how-to-generate-a-random-string-of-a-fixed-length-in-go/22892986#22892986
 var letters = []rune("abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789")
 
-func randSeq(n int) string {
+// from FenderQ
+func randomNumber(max int) (int, error) {
+        bi := big.NewInt(int64(max))
+        rn, err := rand.Int(rand.Reader, bi)
+        if err != nil {
+                return 0, err
+        }
+        n := int(rn.Int64())
+        return n, nil
+}
+
+func randSeq(n int) (string, error) {
 	b := make([]rune, n)
 	for i := range b {
-		b[i] = letters[rand.Intn(len(letters))]
+		var rn, err = randomNumber(len(letters))
+		if err != nil {
+			return "", err
+		}
+		b[i] = letters[rn]
 	}
-	return string(b)
+	return string(b), nil
 }
 
 func sendInternalServerError(w http.ResponseWriter, err error) {
@@ -643,7 +656,11 @@ func postHandler(w http.ResponseWriter, r *http.Request, ctx context.Context, db
 		return
 	}
 
-	code := randSeq(6)
+	code, err := randSeq(6)
+	if err != nil {
+		return
+	}
+
 	postsCollection := db.Collection("posts")
 
 	record := EncryptedPostRecord{
