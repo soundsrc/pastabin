@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"net/http/fcgi"
 	"os"
+	"os/signal"
 	"regexp"
 	"strconv"
 	"strings"
@@ -64,7 +65,7 @@ type CryptoKey struct {
 }
 
 var globalOptions Options
-var globalEncKeyMap map[uint32]*CryptoKey = nil
+var globalEncKeyMap map[uint32]*CryptoKey = make(map[uint32]*CryptoKey)
 
 func purgeExpiredEncryptionKeys() {
 
@@ -85,6 +86,18 @@ func purgeExpiredEncryptionKeys() {
 			delete(globalEncKeyMap, id)
 		}
 	}
+
+}
+
+func wipeEncryptionKeys() {
+
+	for _, key := range globalEncKeyMap {
+		// zero memory
+		for i := 0; i < 32; i++ {
+			key.Key[i] = 0
+		}
+	}
+	globalEncKeyMap = make(map[uint32]*CryptoKey)
 
 }
 
@@ -114,9 +127,7 @@ func findOrGenerateEncryptionKey(validityDate time.Time) (uint32, *CryptoKey, er
 	if globalOptions.Debug {
 		fmt.Printf("Add enc key: %d\n", id)
 	}
-	if globalEncKeyMap == nil {
-		globalEncKeyMap = make(map[uint32]*CryptoKey)
-	}
+
 	globalEncKeyMap[id] = key
 
 	return id, key, nil
@@ -214,9 +225,27 @@ func main() {
 		}
 	}()
 
+	sigChan := make(chan os.Signal)
+	signal.Notify(sigChan, os.Interrupt)
+	go func(){
+		for _ = range sigChan {
+			if (globalOptions.Debug) {
+				fmt.Printf("Caught SIGINT. Shutting down.\n")
+			}
+			wipeEncryptionKeys()
+			os.Exit(0)
+		}
+	}()
+
 	if err = fcgi.Serve(listener, nil); err != nil {
 		panic(err)
 	}
+
+	if (globalOptions.Debug) {
+		fmt.Printf("Shutting down.\n")
+	}
+
+	wipeEncryptionKeys()
 
 }
 
