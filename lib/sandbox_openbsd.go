@@ -1,11 +1,13 @@
+//go:build openbsd
 // +build openbsd
 
 package lib
 
 import (
-	"golang.org/x/sys/unix"
 	"os"
 	"path/filepath"
+
+	"golang.org/x/sys/unix"
 )
 
 func Sandbox(socketPath string) error {
@@ -18,7 +20,7 @@ func Sandbox(socketPath string) error {
 
 	exeDir := filepath.Dir(exePath)
 
-	templateFiles := []string{ "main.gohtml", "header.gohtml", "footer.gohtml", "display.gohtml" }
+	templateFiles := []string{"main.gohtml", "header.gohtml", "footer.gohtml", "display.gohtml"}
 	for _, file := range templateFiles {
 		if err = unix.Unveil(filepath.Join(exeDir, file), "r"); err != nil {
 			return err
@@ -33,14 +35,14 @@ func Sandbox(socketPath string) error {
 		return err
 	}
 
- 	if err = unix.Unveil("/tmp", "rwc"); err != nil {
+	if err = unix.Unveil("/tmp", "rwc"); err != nil {
 		return err
 	}
 
 	if socketPath != "" {
 		if err = unix.Unveil(socketPath, "rwc"); err != nil {
 			return err
-        }
+		}
 	}
 
 	if err = unix.Pledge("stdio inet rpath wpath cpath", ""); err != nil {

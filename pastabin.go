@@ -1,7 +1,6 @@
 package main
 
 import (
-	"./lib"
 	"bytes"
 	"context"
 	"crypto/aes"
@@ -11,10 +10,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"html/template"
 	"io"
 	"math/big"
@@ -28,6 +23,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"pastabin/lib"
+
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 type Options struct {
@@ -225,11 +227,11 @@ func main() {
 		}
 	}()
 
-	sigChan := make(chan os.Signal)
+	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt)
-	go func(){
+	go func() {
 		for _ = range sigChan {
-			if (globalOptions.Debug) {
+			if globalOptions.Debug {
 				fmt.Printf("Caught SIGINT. Shutting down.\n")
 			}
 			wipeEncryptionKeys()
@@ -241,7 +243,7 @@ func main() {
 		panic(err)
 	}
 
-	if (globalOptions.Debug) {
+	if globalOptions.Debug {
 		fmt.Printf("Shutting down.\n")
 	}
 
@@ -415,13 +417,13 @@ var letters = []rune("abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 // from FenderQ
 func randomNumber(max int) (int, error) {
-        bi := big.NewInt(int64(max))
-        rn, err := rand.Int(rand.Reader, bi)
-        if err != nil {
-                return 0, err
-        }
-        n := int(rn.Int64())
-        return n, nil
+	bi := big.NewInt(int64(max))
+	rn, err := rand.Int(rand.Reader, bi)
+	if err != nil {
+		return 0, err
+	}
+	n := int(rn.Int64())
+	return n, nil
 }
 
 func randSeq(n int) (string, error) {
