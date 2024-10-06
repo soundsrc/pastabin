@@ -473,6 +473,12 @@ func getAttachmentHandler(w http.ResponseWriter, r *http.Request, ctx context.Co
 		return
 	}
 
+	if time.Now().After(result.ExpireDate) {
+		err = nil
+		send404ServerError(w)
+		return
+	}
+
 	key, hasKey := globalEncKeyMap[result.EncID]
 	if !hasKey {
 		err = nil
@@ -520,6 +526,12 @@ func readPageHandler(w http.ResponseWriter, r *http.Request, ctx context.Context
 	var result PostRecord
 	err = postsCollection.FindOne(ctx, bson.M{"code": code}).Decode(&result)
 	if err != nil {
+		err = nil
+		send404ServerError(w)
+		return
+	}
+
+	if time.Now().After(result.ExpireDate) {
 		err = nil
 		send404ServerError(w)
 		return
